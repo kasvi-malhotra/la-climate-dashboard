@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How clean is LA's grid right now?</title>
+<style>
+  :root { --bg:#0e1116; --card:#171c24; --text:#e6edf3; --dim:#8b949e; --line:#2d333b; }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:32px 20px; min-height:100vh;
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,"Segoe UI",system-ui,sans-serif;
+  }
+  .wrap { max-width:720px; margin:0 auto; }
+  h1 { font-size:20px; font-weight:600; margin:0 0 4px; }
+  .sub { color:var(--dim); font-size:14px; margin:0 0 24px; }
+  select, input, button {
+    background:var(--card); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:9px 12px; font-size:14px; font-family:inherit;
+  }
+  button { cursor:pointer; font-weight:600; }
+  button:hover { border-color:#58a6ff; }
+  .card { background:var(--card); border-radius:16px; padding:28px; margin-bottom:16px; }
+  .hidden { display:none; }
+  .reading { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  .number { font-size:72px; font-weight:700; line-height:1; }
+  .units { color:var(--dim); font-size:15px; }
+  .badge {
+    display:inline-block; margin-top:16px; padding:6px 14px; border-radius:999px;
+    font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.5px;
+    color:#0e1116;
+  }
+  .verdict { margin-top:20px; font-size:17px; line-height:1.5; }
+  .mix-row { display:flex; align-items:center; gap:12px; margin-bottom:10px; font-size:14px; }
+  .mix-label { width:110px; color:var(--dim); }
+  .mix-bar { flex:1; height:10px; background:#232a33; border-radius:999px; overflow:hidden; }
+  .mix-fill { display:block; height:100%; border-radius:999px; }
+  .mix-pct { width:48px; text-align:right; font-variant-numeric:tabular-nums; }
+  .note { color:var(--dim); font-size:13px; line-height:1.6; margin-top:18px;
+          border-top:1px solid var(--line); padding-top:16px; }
+  .card h2 { font-size:15px; font-weight:600; margin:0 0 18px; }
+  .chart { width:100%; height:auto; display:block; overflow:visible; }
+  .chart text { fill:var(--dim); font-size:9px; font-family:inherit; }
+  .chart .gridline { stroke:#232a33; stroke-width:1; }
+  .chart .line { fill:none; stroke:#58a6ff; stroke-width:1.8;
+                 stroke-linejoin:round; stroke-linecap:round; }
+  .chart .area { fill:#58a6ff; opacity:.08; }
+  .chart .dot { stroke:var(--card); stroke-width:1.2; }
+  .chart .hit { fill:transparent; cursor:pointer; }
+  .chart .hit:hover ~ .dot { r:4; }
+  .chart .cursor { stroke:var(--text); stroke-width:1; stroke-dasharray:3 3; opacity:.45; }
+  .mix-head { display:flex; align-items:baseline; justify-content:space-between;
+              gap:12px; margin:0 0 18px; }
+  .mix-head h2 { margin:0; }
+  .linkish { background:none; border:none; color:#58a6ff; padding:0;
+             font-size:13px; cursor:pointer; }
+  .linkish:hover { text-decoration:underline; }
+  .foot { color:var(--dim); font-size:12px; text-align:center; margin-top:24px; line-height:1.6; }
+  a { color:#58a6ff; }
+  .setup p { line-height:1.6; }
+  .err { color:#f85149; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>How clean is LA's grid right now?</h1>
+  <p class="sub">Live generation mix and estimated carbon intensity</p>
+
+  <div class="card setup hidden" id="setup">
+    <p><strong>One-time setup.</strong> This uses the US Energy Information
+    Administration's data, which needs a free API key.</p>
+    <p>1. Get one instantly at
+      <a href="https://www.eia.gov/opendata/register.php" target="_blank">eia.gov/opendata/register</a><br>
+    2. Paste it below.</p>
+    <p>
+      <input id="keyInput" placeholder="paste your EIA API key" size="40">
+      <button id="saveKey">Save</button>
+    </p>
+    <p class="note" style="margin-top:8px">
+      Your key is stored only in this browser, never in the file itself.
+      You can hand this page to someone else without handing over your key.
+    </p>
+    <p id="setupErr" class="err"></p>
+  </div>
+
+  <div id="main" class="hidden">
+    <select id="region">
+      <option value="LDWP" selected>Los Angeles (LADWP)</option>
+      <option value="CISO">Rest of California (CAISO)</option>
+      <option value="BANC">Sacramento (BANC)</option>
+      <option value="IID">Imperial Valley (IID)</option>
+    </select>
+
+    <div class="card">
+      <div class="reading">
+        <span class="number" id="number">—</span>
+        <span class="units">grams CO₂ per kWh</span>
+      </div>
+      <span class="badge" id="badge">loading</span>
+      <div class="verdict" id="verdict"></div>
+    </div>
+
+    <div class="card">
+      <div class="mix-head">
+        <h2>Last 24 hours</h2>
+        <span style="color:var(--dim);font-size:13px">click any hour</span>
+      </div>
+      <svg class="chart" id="chart" viewBox="0 0 480 150" role="img"></svg>
+      <p class="note" id="chartNote"></p>
+    </div>
+
+    <div class="card">
+      <div class="mix-head">
+        <h2 id="mixHeading">Right now, by fuel</h2>
+        <button class="linkish hidden" id="backToNow">back to now</button>
+      </div>
+      <div id="mix"></div>
+      <p class="note" id="mixNote"></p>
+    </div>
+  </div>
+
+  <p class="foot">
+    Source: US EIA hourly electric grid monitor · intensity estimated from fuel mix
+    using IPCC lifecycle emission factors<br>
+    <span id="stamp"></span>
+  </p>
+</div>
+
+<script>
+const FUELS = {
+  COL: { name:"Coal",        ef:820, color:"#8b949e" },
+  NG:  { name:"Natural gas", ef:490, color:"#f0883e" },
+  OIL: { name:"Oil",         ef:650, color:"#6e7681" },
+  OTH: { name:"Other",       ef:700, color:"#6e7681" },
+  NUC: { name:"Nuclear",     ef:12,  color:"#bc8cff" },
+  WND: { name:"Wind",        ef:11,  color:"#58a6ff" },
+  SUN: { name:"Solar",       ef:48,  color:"#f0d349" },
+  WAT: { name:"Hydro",       ef:24,  color:"#39c5cf" },
+  GEO: { name:"Geothermal",  ef:38,  color:"#db61a2" },
+  BIO: { name:"Biomass",     ef:230, color:"#7ee787" }
+};
+
+const BANDS = [
+  { max:100, index:"very low",  color:"#3fb950",
+    verdict:"Fantastic time to run the dishwasher, charge the car, do the laundry." },
+  { max:250, index:"low",       color:"#7ee787",
+    verdict:"Good time to use electricity. The grid is mostly running on clean power." },
+  { max:400, index:"moderate",  color:"#d29922",
+    verdict:"Middling. Fine for essentials, but maybe hold off on the big appliances." },
+  { max:550, index:"high",      color:"#f0883e",
+    verdict:"Dirty right now — gas is doing the heavy lifting. Wait a few hours if you can." },
+  { max:Infinity, index:"very high", color:"#f85149",
+    verdict:"Worst time to use power. Almost all of this is being burned, not harvested." }
+];
+
+const $ = id => document.getElementById(id);
+const getKey = () => localStorage.getItem("eiaKey");
+
+const state = { byPeriod: new Map(), points: [], latest: null, selected: null };
+
+function showSetup(message) {
+  $("setup").classList.remove("hidden");
+  $("main").classList.add("hidden");
+  $("setupErr").textContent = message || "";
+}
+
+$("saveKey").addEventListener("click", () => {
+  const key = $("keyInput").value.trim();
+  if (!key) return;
+  localStorage.setItem("eiaKey", key);
+  load();
+});
+
+$("region").addEventListener("change", load);
+
+async function load() {
+  const key = getKey();
+  if (!key) return showSetup();
+
+  const url = "https://api.eia.gov/v2/electricity/rto/fuel-type-data/data/"
+    + "?frequency=hourly&data[0]=value"
+    + "&facets[respondent][]=" + $("region").value
+    + "&sort[0][column]=period&sort[0][direction]=desc&length=2000"
+    + "&api_key=" + encodeURIComponent(key);
+
+  let json;
+  try {
+    const res = await fetch(url);
+    json = await res.json();
+    if (!res.ok) {
+      const err = json?.error ?? json?.response?.error;
+      throw new Error(
+        (typeof err === "string" ? err : err?.message || err?.description)
+        || "EIA returned " + res.status
+      );
+    }
+  } catch (e) {
+    return showSetup("That didn't work: " + e.message + " — check the key and try again.");
+  }
+
+  const rows = json?.response?.data || [];
+  if (!rows.length) return showSetup("EIA returned no data for that region.");
+
+  const byPeriod = new Map();
+  for (const r of rows) {
+    if (!(Number(r.value) > 0)) continue;
+    if (!byPeriod.has(r.period)) byPeriod.set(r.period, []);
+    byPeriod.get(r.period).push(r);
+  }
+
+  const periods = [...byPeriod.keys()].sort().reverse();
+
+  state.byPeriod = byPeriod;
+  state.latest = periods[0];
+  state.points = periods.slice(0, 24).reverse()
+    .map(p => ({ period: p, intensity: intensityOf(byPeriod.get(p)) }));
+  if (!byPeriod.has(state.selected)) state.selected = state.latest;
+
+  $("setup").classList.add("hidden");
+  $("main").classList.remove("hidden");
+  draw();
+}
+
+function draw() {
+  render(state.byPeriod.get(state.selected), state.selected);
+  renderChart(state.points);
+}
+
+function select(period) {
+  state.selected = period;
+  draw();
+}
+
+$("backToNow").addEventListener("click", () => select(state.latest));
+
+$("chart").addEventListener("click", e => {
+  const hit = e.target.closest("[data-period]");
+  if (hit) select(hit.dataset.period);
+});
+
+function intensityOf(rows) {
+  const total = rows.reduce((sum, r) => sum + Number(r.value), 0);
+  return Math.round(
+    rows.reduce((sum, r) => sum + Number(r.value) * (FUELS[r.fueltype]?.ef ?? 700), 0) / total
+  );
+}
+
+const bandFor = v => BANDS.find(b => v < b.max);
+const hourOf = period => new Date(period + ":00:00Z").getHours();
+const label = period => String(hourOf(period)).padStart(2, "0") + ":00";
+
+function renderChart(points) {
+  if (points.length < 2) {
+    $("chart").innerHTML = "";
+    $("chartNote").textContent = "Not enough history yet to draw a trend.";
+    return;
+  }
+
+  const W = 480, H = 150, PAD_L = 30, PAD_R = 6, PAD_B = 18, PAD_T = 10;
+  const plotW = W - PAD_L - PAD_R, plotH = H - PAD_B - PAD_T;
+  const top = Math.max(100, Math.ceil(Math.max(...points.map(p => p.intensity)) / 100) * 100);
+  const step = plotW / (points.length - 1);
+  const x = i => PAD_L + i * step;
+  const y = v => PAD_T + plotH - (v / top) * plotH;
+
+  const gridlines = [0, top / 2, top].map(v => `
+    <line class="gridline" x1="${PAD_L}" x2="${W - PAD_R}" y1="${y(v)}" y2="${y(v)}"/>
+    <text x="${PAD_L - 6}" y="${y(v) + 3}" text-anchor="end">${v}</text>
+  `).join("");
+
+  const coords = points.map((p, i) => `${x(i)},${y(p.intensity)}`).join(" ");
+  const area = `<polygon class="area" points="${PAD_L},${y(0)} ${coords} ${W - PAD_R},${y(0)}"/>`;
+  const line = `<polyline class="line" points="${coords}"/>`;
+
+  const selIndex = points.findIndex(p => p.period === state.selected);
+  const cursor = selIndex < 0 ? "" : `
+    <line class="cursor" x1="${x(selIndex)}" x2="${x(selIndex)}"
+          y1="${PAD_T}" y2="${PAD_T + plotH}"/>`;
+
+  const dots = points.map((p, i) => `
+    <circle class="dot" cx="${x(i)}" cy="${y(p.intensity)}"
+            r="${i === selIndex ? 4.5 : 2.4}" fill="${bandFor(p.intensity).color}"/>
+  `).join("");
+
+  const hits = points.map((p, i) => `
+    <rect class="hit" data-period="${p.period}"
+          x="${x(i) - step / 2}" y="${PAD_T}" width="${step}" height="${plotH}">
+      <title>${label(p.period)} — ${p.intensity} g/kWh · click for the fuel mix</title>
+    </rect>
+  `).join("");
+
+  const labels = points.map((p, i) => {
+    const hour = hourOf(p.period);
+    if (hour % 6 !== 0) return "";
+    return `<text x="${x(i)}" y="${H - 5}" text-anchor="middle">${label(p.period)}</text>`;
+  }).join("");
+
+  $("chart").innerHTML = gridlines + area + line + cursor + dots + labels + hits;
+
+  const cleanest = points.reduce((a, b) => (b.intensity < a.intensity ? b : a));
+  const dirtiest = points.reduce((a, b) => (b.intensity > a.intensity ? b : a));
+  $("chartNote").textContent =
+    `Cleanest hour was ${label(cleanest.period)} at ${cleanest.intensity} g/kWh — `
+    + `dirtiest was ${label(dirtiest.period)} at ${dirtiest.intensity}. Times are local.`;
+}
+
+function render(rows, period) {
+  const total = rows.reduce((sum, r) => sum + Number(r.value), 0);
+  const intensity = intensityOf(rows);
+  const band = bandFor(intensity);
+
+  const isNow = period === state.latest;
+
+  $("number").textContent = intensity;
+  $("number").style.color = band.color;
+  $("badge").textContent = band.index;
+  $("badge").style.background = band.color;
+  $("verdict").textContent = isNow
+    ? band.verdict
+    : `At ${label(period)} the grid was ${band.index} — ${intensity} g/kWh.`;
+
+  $("mixHeading").textContent = isNow ? "Right now, by fuel" : `At ${label(period)}, by fuel`;
+  $("backToNow").classList.toggle("hidden", isNow);
+
+  const mix = rows
+    .map(r => ({
+      name: FUELS[r.fueltype]?.name ?? r.fueltype,
+      color: FUELS[r.fueltype]?.color ?? "#6e7681",
+      pct: (Number(r.value) / total) * 100
+    }))
+    .sort((a, b) => b.pct - a.pct);
+
+  $("mix").innerHTML = mix.map(f => `
+    <div class="mix-row">
+      <span class="mix-label">${f.name}</span>
+      <span class="mix-bar">
+        <span class="mix-fill" style="width:${f.pct}%; background:${f.color}"></span>
+      </span>
+      <span class="mix-pct">${f.pct.toFixed(1)}%</span>
+    </div>
+  `).join("");
+
+  $("mixNote").textContent = $("region").value === "LDWP"
+    ? "LADWP is its own balancing authority — the City of LA is not part of CAISO, "
+      + "so this is genuinely LA's own grid, not California's average."
+    : "This region is reported separately from LADWP, which serves the City of LA.";
+
+  $("stamp").textContent = "Data hour " + period + " (UTC) · loaded "
+    + new Date().toLocaleTimeString();
+}
+
+load();
+setInterval(load, 10 * 60 * 1000);
+</script>
+</body>
+</html>
